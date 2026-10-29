@@ -792,6 +792,10 @@ function openConfigModal() {
       elements.cfgStorageBucket.value = cfg.storageBucket || '';
       elements.cfgMessagingSenderId.value = cfg.messagingSenderId || '';
       elements.cfgAppId.value = cfg.appId || '';
+    } else {
+      // Default helpers for project connect-37efb
+      elements.cfgAuthDomain.value = elements.cfgAuthDomain.value || 'connect-37efb.firebaseapp.com';
+      elements.cfgProjectId.value = elements.cfgProjectId.value || 'connect-37efb';
     }
   } catch (e) {
     // Ignore

@@ -21,17 +21,17 @@ export async function getFirebaseConfig() {
     console.warn('Failed to parse localStorage Firebase config', err);
   }
 
-  // 2. Fetch from Node backend .env
+  // 2. Fetch from Node backend .env (if running with Node server)
   try {
-    const response = await fetch('/api/config');
-    if (response.ok) {
+    const response = await fetch('./api/config');
+    if (response && response.ok) {
       const data = await response.json();
       if (data.configured && data.config && isValidConfig(data.config)) {
         return { config: data.config, source: 'env' };
       }
     }
   } catch (err) {
-    console.warn('Could not fetch config from /api/config', err);
+    // Expected on static hosts like GitHub Pages where /api/config doesn't exist
   }
 
   return { config: null, source: 'none' };
