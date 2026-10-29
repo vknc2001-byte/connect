@@ -1,14 +1,25 @@
 // Firebase Configuration Manager
-// Retrieves configuration from localStorage or from the Node.js backend (/api/config)
+// Retrieves configuration from default constants, localStorage, or Node.js backend (/api/config)
 
 const STORAGE_KEY = 'firechat_firebase_config';
 
+// User's default project configuration
+export const DEFAULT_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyAq5CfhRRJwCapoWgUwgfDRlRDjCiASVZo",
+  authDomain: "connect-37efb.firebaseapp.com",
+  projectId: "connect-37efb",
+  storageBucket: "connect-37efb.firebasestorage.app",
+  messagingSenderId: "63782859773",
+  appId: "1:63782859773:web:16303078ab723c4359df94",
+  measurementId: "G-N19WCBQ6SH"
+};
+
 /**
- * Fetch Firebase config either from localStorage (user override) or from backend (.env)
- * @returns {Promise<Object|null>}
+ * Fetch Firebase config either from localStorage, backend .env, or default constants
+ * @returns {Promise<Object>}
  */
 export async function getFirebaseConfig() {
-  // 1. Check if user configured directly in browser
+  // 1. Check if user configured custom override directly in browser
   try {
     const savedConfig = localStorage.getItem(STORAGE_KEY);
     if (savedConfig) {
@@ -31,7 +42,12 @@ export async function getFirebaseConfig() {
       }
     }
   } catch (err) {
-    // Expected on static hosts like GitHub Pages where /api/config doesn't exist
+    // Expected on static hosts like GitHub Pages
+  }
+
+  // 3. Fallback to built-in project configuration
+  if (isValidConfig(DEFAULT_FIREBASE_CONFIG)) {
+    return { config: DEFAULT_FIREBASE_CONFIG, source: 'default' };
   }
 
   return { config: null, source: 'none' };
