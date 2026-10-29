@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <!-- FontAwesome Icons for crisp UI icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="./css/style.css?v=4">
+  <link rel="stylesheet" href="./css/style.css?v=5">
 </head>
 <body>
   <!-- Incoming Message Floating Notification Popup Bar -->
@@ -44,6 +44,11 @@
     </div>
 
     <div class="header-actions">
+      <!-- Desktop Notification Permission Bell Button -->
+      <button type="button" id="notify-perm-btn" class="btn-icon" title="Desktop Notifications (Alerts appear when browsing YouTube or other tabs)">
+        <i class="fa-regular fa-bell"></i>
+      </button>
+
       <!-- Firebase connection indicator -->
       <button id="config-status-badge" class="status-badge" title="View Firebase status">
         <span class="status-dot"></span>
@@ -394,6 +399,6 @@
   </div>
 
   <!-- Application Scripts -->
-  <script type="module" src="./js/app.js?v=4"></script>
+  <script type="module" src="./js/app.js?v=5"></script>
 </body>
 </html>

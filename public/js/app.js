@@ -28,7 +28,7 @@ import {
   saveFirebaseConfig, 
   clearFirebaseConfig, 
   isValidConfig 
-} from './firebase-config.js?v=4';
+} from './firebase-config.js?v=5';
 
 // Global App State
 let app = null;
@@ -58,6 +58,7 @@ const elements = {
   chatView: document.getElementById('chat-view'),
 
   // Header
+  notifyPermBtn: document.getElementById('notify-perm-btn'),
   configStatusBadge: document.getElementById('config-status-badge'),
   userHeaderProfile: document.getElementById('user-header-profile'),
   headerAvatar: document.getElementById('header-avatar'),
@@ -230,6 +231,16 @@ async function handleAuthStateChanged(user) {
     // Subscribe to registered users & global message notifications
     subscribeToRegisteredUsers();
     subscribeToGlobalChatNotifications();
+
+    // Check & request Desktop Notification Permission (for alerts when on YouTube or other tabs)
+    if ('Notification' in window) {
+      updateNotificationBellIcon(Notification.permission);
+      if (Notification.permission === 'default') {
+        setTimeout(() => {
+          requestNotificationPermission(false);
+        }, 1500);
+      }
+    }
   } else {
     currentUser = null;
     selectedUser = null;
@@ -665,6 +676,93 @@ function showToastNotification({ senderId, senderName, senderPhoto, text }) {
   toastDismissTimer = setTimeout(() => {
     hideToastNotification();
   }, 4500);
+
+  // Trigger Windows / System Desktop Notification (Bottom-Right) if user is on YouTube or another tab
+  triggerDesktopNotification({
+    senderId,
+    senderName,
+    senderPhoto: avatar,
+    text: text || 'New message'
+  });
+}
+
+/**
+ * Triggers Native Browser/OS Desktop Notification (shows at bottom-right on Windows)
+ */
+function triggerDesktopNotification({ senderId, senderName, senderPhoto, text }) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+
+  // Only trigger if user is NOT actively looking at this tab (e.g. watching YouTube, another tab, or minimized)
+  if (document.hidden || !document.hasFocus()) {
+    try {
+      const notif = new Notification(senderName || 'FireChat', {
+        body: text || 'New message received',
+        icon: senderPhoto || './favicon.ico',
+        tag: `firechat_${senderId}`, // Group messages by sender
+        renotify: true
+      });
+
+      notif.onclick = () => {
+        window.focus();
+        const user = registeredUsers.find(u => u.uid === senderId);
+        if (user) {
+          selectUserToChat(user);
+        }
+        notif.close();
+      };
+    } catch (err) {
+      console.warn('Native desktop notification error:', err);
+    }
+  }
+}
+
+/**
+ * Requests desktop notification permission
+ */
+async function requestNotificationPermission(showFeedback = true) {
+  if (!('Notification' in window)) {
+    if (showFeedback) alert('Desktop notifications are not supported by this browser.');
+    return;
+  }
+
+  try {
+    const permission = await Notification.requestPermission();
+    updateNotificationBellIcon(permission);
+    if (permission === 'granted' && showFeedback) {
+      // Send a quick test notification to confirm
+      new Notification('FireChat Notifications Active', {
+        body: 'You will now see message alerts at the bottom-right even when using YouTube or other tabs!',
+        icon: './favicon.ico'
+      });
+    } else if (permission === 'denied' && showFeedback) {
+      alert('Notifications are blocked. Please enable them in your browser site settings (lock icon next to URL) to receive alerts while in other tabs.');
+    }
+  } catch (err) {
+    console.warn('Error requesting notification permission:', err);
+  }
+}
+
+/**
+ * Updates the bell icon state
+ */
+function updateNotificationBellIcon(permission) {
+  if (!elements.notifyPermBtn) return;
+  const icon = elements.notifyPermBtn.querySelector('i');
+  if (!icon) return;
+
+  if (permission === 'granted') {
+    icon.className = 'fa-solid fa-bell';
+    elements.notifyPermBtn.title = 'Desktop Notifications Enabled (Alerts appear when browsing YouTube or other tabs)';
+    elements.notifyPermBtn.style.color = 'var(--primary)';
+  } else if (permission === 'denied') {
+    icon.className = 'fa-solid fa-bell-slash';
+    elements.notifyPermBtn.title = 'Notifications Blocked in Browser Settings (Click lock icon next to URL to allow)';
+    elements.notifyPermBtn.style.color = 'var(--text-dim)';
+  } else {
+    icon.className = 'fa-regular fa-bell';
+    elements.notifyPermBtn.title = 'Click to enable Desktop Notifications (Alerts appear when browsing YouTube or other tabs)';
+    elements.notifyPermBtn.style.color = 'var(--text-muted)';
+  }
 }
 
 function hideToastNotification() {
@@ -1164,6 +1262,11 @@ function handleClearConfig() {
 // ==========================================================================
 
 function setupEventListeners() {
+  // Desktop Notification Permission Bell
+  if (elements.notifyPermBtn) {
+    elements.notifyPermBtn.addEventListener('click', () => requestNotificationPermission(true));
+  }
+
   // Toast Notification Bar
   elements.toastBodyBtn.addEventListener('click', handleToastClick);
   elements.toastCloseBtn.addEventListener('click', hideToastNotification);
