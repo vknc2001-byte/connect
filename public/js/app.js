@@ -14,10 +14,10 @@ import {
   collection, 
   doc, 
   setDoc, 
-  getDoc, 
   onSnapshot, 
   addDoc, 
   query, 
+  where,
   orderBy, 
   serverTimestamp, 
   updateDoc 
@@ -28,7 +28,7 @@ import {
   saveFirebaseConfig, 
   clearFirebaseConfig, 
   isValidConfig 
-} from './firebase-config.js?v=3';
+} from './firebase-config.js?v=4';
 
 // Global App State
 let app = null;
@@ -39,7 +39,17 @@ let selectedUser = null;
 let registeredUsers = [];
 let activeChatUnsubscribe = null;
 let usersListUnsubscribe = null;
+let globalChatsUnsubscribe = null;
+let lastKnownChatTimestamps = {};
 let selectedAttachment = null; // { file, previewUrl, type, name, size }
+
+// Camera State
+let cameraStream = null;
+let cameraFacingMode = 'environment';
+
+// Toast Notification State
+let toastDismissTimer = null;
+let activeToastSenderId = null;
 
 // DOM Element References
 const elements = {
@@ -53,6 +63,14 @@ const elements = {
   headerAvatar: document.getElementById('header-avatar'),
   headerUserName: document.getElementById('header-user-name'),
   logoutBtn: document.getElementById('logout-btn'),
+
+  // Toast Notification Bar
+  toastNotificationBar: document.getElementById('toast-notification-bar'),
+  toastAvatar: document.getElementById('toast-avatar'),
+  toastSenderName: document.getElementById('toast-sender-name'),
+  toastMessageText: document.getElementById('toast-message-text'),
+  toastBodyBtn: document.getElementById('toast-body-btn'),
+  toastCloseBtn: document.getElementById('toast-close-btn'),
 
   // Auth View
   googleLoginBtn: document.getElementById('google-login-btn'),
@@ -78,7 +96,6 @@ const elements = {
   recipientStatusDot: document.getElementById('recipient-status-dot'),
   recipientName: document.getElementById('recipient-name'),
   recipientStatusText: document.getElementById('recipient-status-text'),
-  refreshChatBtn: document.getElementById('refresh-chat-btn'),
   messagesContainer: document.getElementById('messages-container'),
   chatLoadingSpinner: document.getElementById('chat-loading-spinner'),
 
@@ -99,9 +116,23 @@ const elements = {
   // Chat Input
   chatForm: document.getElementById('chat-form'),
   mediaFileInput: document.getElementById('media-file-input'),
+  cameraFileInput: document.getElementById('camera-file-input'),
+  cameraBtn: document.getElementById('camera-btn'),
   attachBtn: document.getElementById('attach-btn'),
   messageTextInput: document.getElementById('message-text-input'),
   sendMessageBtn: document.getElementById('send-message-btn'),
+
+  // Camera Modal
+  cameraModal: document.getElementById('camera-modal'),
+  closeCameraModalBtn: document.getElementById('close-camera-modal-btn'),
+  cameraVideoStream: document.getElementById('camera-video-stream'),
+  cameraSnapshotCanvas: document.getElementById('camera-snapshot-canvas'),
+  cameraLoading: document.getElementById('camera-loading'),
+  cameraSwitchBtn: document.getElementById('camera-switch-btn'),
+  cameraCaptureBtn: document.getElementById('camera-capture-btn'),
+  cameraPostCaptureActions: document.getElementById('camera-post-capture-actions'),
+  cameraRetakeBtn: document.getElementById('camera-retake-btn'),
+  cameraUseBtn: document.getElementById('camera-use-btn'),
 
   // Config Modal
   firebaseModal: document.getElementById('firebase-modal'),
@@ -114,7 +145,6 @@ const elements = {
   cfgApiKey: document.getElementById('cfg-apiKey'),
   cfgAuthDomain: document.getElementById('cfg-authDomain'),
   cfgProjectId: document.getElementById('cfg-projectId'),
-  cfgStorageBucket: document.getElementById('cfg-storageBucket'),
   cfgMessagingSenderId: document.getElementById('cfg-messagingSenderId'),
   cfgAppId: document.getElementById('cfg-appId'),
 
@@ -136,7 +166,7 @@ async function initialize() {
   if (config && isValidConfig(config)) {
     try {
       initFirebase(config);
-      updateConfigStatusBadge(true, source === 'localStorage' ? 'Config (Custom)' : 'Firebase Connected');
+      updateConfigStatusBadge(true, 'Firebase Connected');
       elements.setupHintCard.classList.add('hidden');
     } catch (err) {
       console.error('Firebase init failed:', err);
@@ -145,7 +175,7 @@ async function initialize() {
     }
   } else {
     updateConfigStatusBadge(false, 'Configure Firebase');
-    showSetupHint('Firebase is not yet configured. Please add your credentials in .env or click below to configure.');
+    showSetupHint('Firebase is not yet configured. Please add your credentials.');
   }
 }
 
@@ -197,8 +227,9 @@ async function handleAuthStateChanged(user) {
     elements.chatView.classList.remove('hidden');
     elements.userHeaderProfile.classList.remove('hidden');
 
-    // Subscribe to registered users
+    // Subscribe to registered users & global message notifications
     subscribeToRegisteredUsers();
+    subscribeToGlobalChatNotifications();
   } else {
     currentUser = null;
     selectedUser = null;
@@ -210,6 +241,10 @@ async function handleAuthStateChanged(user) {
     if (activeChatUnsubscribe) {
       activeChatUnsubscribe();
       activeChatUnsubscribe = null;
+    }
+    if (globalChatsUnsubscribe) {
+      globalChatsUnsubscribe();
+      globalChatsUnsubscribe = null;
     }
 
     elements.authView.classList.remove('hidden');
@@ -266,7 +301,7 @@ async function loginWithGoogle() {
     if (err.code === 'auth/popup-closed-by-user') {
       message = 'Sign in popup was closed. Please try again.';
     } else if (err.code === 'auth/unauthorized-domain') {
-      message = 'Domain not authorized in Firebase Console -> Authentication -> Settings -> Authorized domains (add localhost).';
+      message = 'Domain not authorized in Firebase Console -> Authentication -> Settings -> Authorized domains.';
     } else if (err.code === 'auth/operation-not-allowed') {
       message = 'Google sign-in is not enabled. Please enable Google in Firebase Console -> Authentication -> Sign-in method.';
     } else {
@@ -347,7 +382,7 @@ function renderUsersList() {
         <div class="empty-users-hint">
           <i class="fa-solid fa-user-clock" style="font-size: 1.8rem; margin-bottom: 0.5rem; display: block; color: var(--text-dim);"></i>
           No other users registered yet.<br>
-          <span style="font-size: 0.75rem; color: var(--text-dim);">Open another browser or incognito window to log in as a second user and test chatting!</span>
+          <span style="font-size: 0.75rem; color: var(--text-dim);">Open an incognito window and sign in with a 2nd Google account to test chatting!</span>
         </div>
       `;
     } else {
@@ -444,9 +479,37 @@ function subscribeToMessages() {
   const messagesRef = collection(db, 'chats', chatId, 'messages');
   const q = query(messagesRef, orderBy('timestamp', 'asc'));
 
+  let initialLoadDone = false;
+
   activeChatUnsubscribe = onSnapshot(q, (snapshot) => {
     elements.chatLoadingSpinner.classList.add('hidden');
     renderMessages(snapshot.docs);
+
+    if (!initialLoadDone) {
+      initialLoadDone = true;
+      return;
+    }
+
+    // Check for new incoming messages
+    snapshot.docChanges().forEach(change => {
+      if (change.type === 'added') {
+        const msg = change.doc.data();
+        if (msg.senderId !== currentUser.uid) {
+          playMessageChime();
+          // If window is minimized or user is scrolled up, pop up notification bar
+          const container = elements.messagesContainer;
+          const isScrolledUp = container.scrollTop < (container.scrollHeight - container.clientHeight - 150);
+          if (document.hidden || isScrolledUp) {
+            showToastNotification({
+              senderId: msg.senderId,
+              senderName: msg.senderName,
+              senderPhoto: msg.senderPhoto,
+              text: msg.text || (msg.mediaType === 'video' ? '📹 Video' : '📷 Photo')
+            });
+          }
+        }
+      }
+    });
   }, (err) => {
     console.error('Chat messages snapshot error:', err);
     elements.chatLoadingSpinner.classList.add('hidden');
@@ -463,7 +526,7 @@ function renderMessages(docs) {
       <div class="empty-users-hint" style="margin: auto;">
         <i class="fa-regular fa-comment-dots" style="font-size: 2.5rem; margin-bottom: 0.75rem; color: var(--text-dim); display: block;"></i>
         No messages yet.<br>
-        Send a friendly greeting or share a photo to begin chatting!
+        Send a friendly greeting or take a photo to start chatting!
       </div>
     `;
     return;
@@ -533,7 +596,133 @@ function renderMessages(docs) {
 }
 
 // ==========================================================================
-// Sending Messages & Uploading Media
+// Global Chat Notifications (Across All Conversations)
+// ==========================================================================
+
+function subscribeToGlobalChatNotifications() {
+  if (!db || !currentUser) return;
+
+  const chatsQuery = query(
+    collection(db, 'chats'),
+    where('participants', 'array-contains', currentUser.uid)
+  );
+
+  let initialLoad = true;
+
+  globalChatsUnsubscribe = onSnapshot(chatsQuery, (snapshot) => {
+    if (initialLoad) {
+      snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        if (data.lastUpdated && data.lastUpdated.toMillis) {
+          lastKnownChatTimestamps[docSnap.id] = data.lastUpdated.toMillis();
+        }
+      });
+      initialLoad = false;
+      return;
+    }
+
+    snapshot.docChanges().forEach(change => {
+      const data = change.doc.data();
+      const chatId = change.doc.id;
+      const lastUpdatedMs = data.lastUpdated && data.lastUpdated.toMillis ? data.lastUpdated.toMillis() : Date.now();
+      const prevMs = lastKnownChatTimestamps[chatId] || 0;
+
+      if (lastUpdatedMs > prevMs) {
+        lastKnownChatTimestamps[chatId] = lastUpdatedMs;
+
+        // If message is from someone else and not in current active open conversation
+        const isFromOther = data.lastSenderId && data.lastSenderId !== currentUser.uid;
+        const isCurrentlyOpen = selectedUser && selectedUser.uid === data.lastSenderId && !document.hidden;
+
+        if (isFromOther && !isCurrentlyOpen) {
+          const otherUser = registeredUsers.find(u => u.uid === data.lastSenderId);
+          showToastNotification({
+            senderId: data.lastSenderId,
+            senderName: (otherUser && otherUser.displayName) || data.lastSenderName || 'User',
+            senderPhoto: (otherUser && otherUser.photoURL) || '',
+            text: data.lastMessage || 'Sent a message'
+          });
+        }
+      }
+    });
+  }, (err) => {
+    console.warn('Global chat notification listener error:', err);
+  });
+}
+
+function showToastNotification({ senderId, senderName, senderPhoto, text }) {
+  playMessageChime();
+
+  activeToastSenderId = senderId;
+  const avatar = senderPhoto || createInitialsAvatar(senderName);
+  elements.toastAvatar.src = avatar;
+  elements.toastSenderName.textContent = senderName || 'New Message';
+  elements.toastMessageText.textContent = text || 'Sent a message';
+
+  elements.toastNotificationBar.classList.remove('hidden');
+
+  if (toastDismissTimer) clearTimeout(toastDismissTimer);
+  toastDismissTimer = setTimeout(() => {
+    hideToastNotification();
+  }, 4500);
+}
+
+function hideToastNotification() {
+  elements.toastNotificationBar.classList.add('hidden');
+  activeToastSenderId = null;
+  if (toastDismissTimer) {
+    clearTimeout(toastDismissTimer);
+    toastDismissTimer = null;
+  }
+}
+
+function handleToastClick() {
+  if (!activeToastSenderId) return;
+  const user = registeredUsers.find(u => u.uid === activeToastSenderId);
+  if (user) {
+    selectUserToChat(user);
+  }
+  hideToastNotification();
+}
+
+/**
+ * Clean Two-Tone Web Audio Chime (Zero External Files)
+ */
+function playMessageChime() {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    const now = ctx.currentTime;
+
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(587.33, now); // D5
+    gain1.gain.setValueAtTime(0.12, now);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.22);
+
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(880, now + 0.08); // A5
+    gain2.gain.setValueAtTime(0.14, now + 0.08);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(now + 0.08);
+    osc2.stop(now + 0.4);
+  } catch (e) {
+    // Audio autoplay restricted or unsupported
+  }
+}
+
+// ==========================================================================
+// Sending Messages & Handling Media
 // ==========================================================================
 
 async function handleSendMessage() {
@@ -561,7 +750,7 @@ async function handleSendMessage() {
       elements.uploadProgressContainer.classList.remove('hidden');
       elements.progressBarFill.style.width = '35%';
       elements.uploadPercentLabel.textContent = '35%';
-      elements.uploadStatusLabel.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> Optimizing ${attachment.type} for Firestore...`;
+      elements.uploadStatusLabel.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> Optimizing ${attachment.type}...`;
 
       if (attachment.type === 'image') {
         mediaUrl = await compressAndEncodeImage(attachment.file);
@@ -574,7 +763,7 @@ async function handleSendMessage() {
 
       elements.progressBarFill.style.width = '75%';
       elements.uploadPercentLabel.textContent = '75%';
-      elements.uploadStatusLabel.innerHTML = `<i class="fa-solid fa-database"></i> Saving to Firestore database...`;
+      elements.uploadStatusLabel.innerHTML = `<i class="fa-solid fa-database"></i> Sending to chat...`;
     }
 
     const messageData = {
@@ -605,6 +794,8 @@ async function handleSendMessage() {
     await setDoc(chatDocRef, {
       participants: [currentUser.uid, selectedUser.uid],
       lastMessage: text || (mediaType === 'video' ? '📹 Video' : '📷 Photo'),
+      lastSenderId: currentUser.uid,
+      lastSenderName: currentUser.displayName || currentUser.email.split('@')[0],
       lastUpdated: serverTimestamp()
     }, { merge: true });
 
@@ -684,6 +875,121 @@ function readFileAsDataUrl(file) {
 }
 
 // ==========================================================================
+// Live Camera Feature
+// ==========================================================================
+
+async function openCameraModal() {
+  elements.cameraModal.classList.remove('hidden');
+  elements.cameraLoading.classList.remove('hidden');
+  elements.cameraVideoStream.classList.remove('hidden');
+  elements.cameraSnapshotCanvas.classList.add('hidden');
+  elements.cameraCaptureBtn.classList.remove('hidden');
+  elements.cameraSwitchBtn.classList.remove('hidden');
+  elements.cameraPostCaptureActions.classList.add('hidden');
+
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error('Camera stream not supported in this browser.');
+    }
+
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(t => t.stop());
+      cameraStream = null;
+    }
+
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: cameraFacingMode,
+        width: { ideal: 1280 },
+        height: { ideal: 960 }
+      },
+      audio: false
+    });
+
+    elements.cameraVideoStream.srcObject = cameraStream;
+    elements.cameraVideoStream.onloadedmetadata = () => {
+      elements.cameraLoading.classList.add('hidden');
+      elements.cameraVideoStream.play();
+    };
+  } catch (err) {
+    console.warn('Camera stream error, using device camera fallback:', err);
+    closeCameraModal();
+    // Fall back to native camera file input
+    elements.cameraFileInput.click();
+  }
+}
+
+function captureCameraSnapshot() {
+  if (!elements.cameraVideoStream || !cameraStream) return;
+
+  const video = elements.cameraVideoStream;
+  const canvas = elements.cameraSnapshotCanvas;
+
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  // Switch display from video to frozen canvas
+  canvas.classList.remove('hidden');
+  video.classList.add('hidden');
+
+  // Toggle buttons
+  elements.cameraCaptureBtn.classList.add('hidden');
+  elements.cameraSwitchBtn.classList.add('hidden');
+  elements.cameraPostCaptureActions.classList.remove('hidden');
+}
+
+function retakeCameraSnapshot() {
+  elements.cameraSnapshotCanvas.classList.add('hidden');
+  elements.cameraVideoStream.classList.remove('hidden');
+  elements.cameraCaptureBtn.classList.remove('hidden');
+  elements.cameraSwitchBtn.classList.remove('hidden');
+  elements.cameraPostCaptureActions.classList.add('hidden');
+}
+
+function useCameraSnapshot() {
+  const canvas = elements.cameraSnapshotCanvas;
+  canvas.toBlob(blob => {
+    if (!blob) return;
+
+    const file = new File([blob], `photo_${Date.now()}.jpg`, { type: 'image/jpeg' });
+    const previewUrl = URL.createObjectURL(blob);
+
+    selectedAttachment = {
+      file: file,
+      previewUrl: previewUrl,
+      type: 'image',
+      name: file.name,
+      size: formatBytes(file.size)
+    };
+
+    // Render preview in chat input
+    elements.previewFileName.textContent = selectedAttachment.name;
+    elements.previewFileSize.textContent = selectedAttachment.size;
+    elements.previewMediaWrapper.innerHTML = `<img src="${previewUrl}" alt="Camera snapshot" />`;
+    elements.mediaPreviewContainer.classList.remove('hidden');
+
+    closeCameraModal();
+    elements.messageTextInput.focus();
+  }, 'image/jpeg', 0.85);
+}
+
+function switchCameraFacing() {
+  cameraFacingMode = cameraFacingMode === 'user' ? 'environment' : 'user';
+  openCameraModal();
+}
+
+function closeCameraModal() {
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(t => t.stop());
+    cameraStream = null;
+  }
+  elements.cameraModal.classList.add('hidden');
+}
+
+// ==========================================================================
 // Media File Attachment & Preview
 // ==========================================================================
 
@@ -696,21 +1002,18 @@ function handleFileSelection(event) {
 
   if (!isImage && !isVideo) {
     alert('Please select an image or video file.');
-    elements.mediaFileInput.value = '';
+    event.target.value = '';
     return;
   }
 
   // Check Firestore limit (1MB max doc size):
-  // For images, our client auto-compresses them to ~100KB-200KB.
-  // For videos, limit file size to 750KB so it fits directly in Firestore!
   if (isVideo && file.size > 750 * 1024) {
     alert(
-      '⚠️ Firestore Free Tier Notice:\n\n' +
-      'Because we store media directly in free Firestore (no paid Cloud Storage required), ' +
-      'videos must be short clips under 750 KB.\n\n' +
-      'Please select a shorter video clip, or choose any photo (photos are auto-compressed automatically)!'
+      '⚠️ Free Firestore Limit:\n\n' +
+      'Videos must be short clips under 750 KB to fit within free Firestore.\n' +
+      'Please select a shorter clip or choose a photo (photos are auto-compressed)!'
     );
-    elements.mediaFileInput.value = '';
+    event.target.value = '';
     return;
   }
 
@@ -738,7 +1041,7 @@ function handleFileSelection(event) {
   }
 
   elements.mediaPreviewContainer.classList.remove('hidden');
-  elements.mediaFileInput.value = '';
+  event.target.value = '';
   elements.messageTextInput.focus();
 }
 
@@ -781,7 +1084,6 @@ function closeLightbox() {
 // ==========================================================================
 
 function openConfigModal() {
-  // Pre-fill form from localStorage if present
   try {
     const saved = localStorage.getItem('firechat_firebase_config');
     if (saved) {
@@ -789,11 +1091,9 @@ function openConfigModal() {
       elements.cfgApiKey.value = cfg.apiKey || '';
       elements.cfgAuthDomain.value = cfg.authDomain || '';
       elements.cfgProjectId.value = cfg.projectId || '';
-      elements.cfgStorageBucket.value = cfg.storageBucket || '';
       elements.cfgMessagingSenderId.value = cfg.messagingSenderId || '';
       elements.cfgAppId.value = cfg.appId || '';
     } else {
-      // Default helpers for project connect-37efb
       elements.cfgAuthDomain.value = elements.cfgAuthDomain.value || 'connect-37efb.firebaseapp.com';
       elements.cfgProjectId.value = elements.cfgProjectId.value || 'connect-37efb';
     }
@@ -812,7 +1112,6 @@ function parsePastedConfig() {
   if (!text.trim()) return;
 
   const extract = (key) => {
-    // Matches: apiKey: "...", apiKey: '...', "apiKey": "..."
     const regex = new RegExp(`['"]?${key}['"]?\\s*:\\s*['"\`]([^'"\`]+)['"\`]`, 'i');
     const match = text.match(regex);
     return match ? match[1].trim() : '';
@@ -821,14 +1120,12 @@ function parsePastedConfig() {
   const apiKey = extract('apiKey');
   const authDomain = extract('authDomain');
   const projectId = extract('projectId');
-  const storageBucket = extract('storageBucket');
   const messagingSenderId = extract('messagingSenderId');
   const appId = extract('appId');
 
   if (apiKey) elements.cfgApiKey.value = apiKey;
   if (authDomain) elements.cfgAuthDomain.value = authDomain;
   if (projectId) elements.cfgProjectId.value = projectId;
-  if (storageBucket) elements.cfgStorageBucket.value = storageBucket;
   if (messagingSenderId) elements.cfgMessagingSenderId.value = messagingSenderId;
   if (appId) elements.cfgAppId.value = appId;
 }
@@ -838,7 +1135,6 @@ function saveConfigFromModal() {
     apiKey: elements.cfgApiKey.value.trim(),
     authDomain: elements.cfgAuthDomain.value.trim(),
     projectId: elements.cfgProjectId.value.trim(),
-    storageBucket: elements.cfgStorageBucket.value.trim(),
     messagingSenderId: elements.cfgMessagingSenderId.value.trim(),
     appId: elements.cfgAppId.value.trim()
   };
@@ -856,9 +1152,9 @@ function saveConfigFromModal() {
 }
 
 function handleClearConfig() {
-  if (confirm('Clear saved Firebase configuration from browser?')) {
+  if (confirm('Reset Firebase configuration to default?')) {
     clearFirebaseConfig();
-    alert('Configuration cleared. Reloading page...');
+    alert('Configuration reset. Reloading page...');
     window.location.reload();
   }
 }
@@ -868,6 +1164,10 @@ function handleClearConfig() {
 // ==========================================================================
 
 function setupEventListeners() {
+  // Toast Notification Bar
+  elements.toastBodyBtn.addEventListener('click', handleToastClick);
+  elements.toastCloseBtn.addEventListener('click', hideToastNotification);
+
   // Config Modal
   elements.configStatusBadge.addEventListener('click', openConfigModal);
   elements.openConfigBtn.addEventListener('click', openConfigModal);
@@ -897,17 +1197,21 @@ function setupEventListeners() {
     elements.chatView.classList.remove('mobile-active');
   });
 
-  // Chat Refresh
-  elements.refreshChatBtn.addEventListener('click', () => {
-    if (selectedUser) subscribeToMessages();
-  });
-
   // Attachments
   elements.attachBtn.addEventListener('click', () => {
     elements.mediaFileInput.click();
   });
   elements.mediaFileInput.addEventListener('change', handleFileSelection);
   elements.cancelPreviewBtn.addEventListener('click', cancelAttachment);
+
+  // Camera
+  elements.cameraBtn.addEventListener('click', openCameraModal);
+  elements.closeCameraModalBtn.addEventListener('click', closeCameraModal);
+  elements.cameraCaptureBtn.addEventListener('click', captureCameraSnapshot);
+  elements.cameraRetakeBtn.addEventListener('click', retakeCameraSnapshot);
+  elements.cameraUseBtn.addEventListener('click', useCameraSnapshot);
+  elements.cameraSwitchBtn.addEventListener('click', switchCameraFacing);
+  elements.cameraFileInput.addEventListener('change', handleFileSelection);
 
   // Send message
   elements.chatForm.addEventListener('submit', (e) => {
@@ -935,10 +1239,14 @@ function setupEventListeners() {
       closeLightbox();
     }
   });
+
+  // Global keydown (Escape)
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       closeLightbox();
       closeConfigModal();
+      closeCameraModal();
+      hideToastNotification();
     }
   });
 }
@@ -985,7 +1293,7 @@ function formatBytes(bytes, decimals = 1) {
 
 function createInitialsAvatar(name) {
   const initial = (name || 'U').charAt(0).toUpperCase();
-  const colors = ['#6366f1', '#f59e0b', '#10b981', '#ec4899', '#8b5cf6', '#06b6d4'];
+  const colors = ['#2563eb', '#d97706', '#059669', '#db2777', '#7c3aed', '#0891b2'];
   const charCode = initial.charCodeAt(0);
   const color = colors[charCode % colors.length];
 
