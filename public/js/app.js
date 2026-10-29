@@ -28,7 +28,7 @@ import {
   saveFirebaseConfig, 
   clearFirebaseConfig, 
   isValidConfig 
-} from './firebase-config.js';
+} from './firebase-config.js?v=3';
 
 // Global App State
 let app = null;
