@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FireChat - Real-Time Chat Application</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- FontAwesome Icons for crisp UI icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <!-- Top Global Navigation Bar -->
+  <header class="app-header">
+    <div class="header-brand">
+      <div class="logo-icon">
+        <i class="fa-solid fa-fire-flame-curved"></i>
+      </div>
+      <div class="brand-text">
+        <span class="brand-title">FireChat</span>
+        <span class="brand-subtitle">Node.js + Firebase</span>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <!-- Firebase connection indicator -->
+      <button id="config-status-badge" class="status-badge" title="Click to view/edit Firebase configuration">
+        <span class="status-dot"></span>
+        <span class="status-text">Checking Firebase...</span>
+      </button>
+
+      <!-- User profile info when logged in -->
+      <div id="user-header-profile" class="user-header-profile hidden">
+        <img id="header-avatar" src="" alt="Avatar" class="avatar-sm">
+        <div class="header-user-info">
+          <span id="header-user-name" class="user-name">User</span>
+          <span class="online-indicator"><span class="dot-online"></span> Online</span>
+        </div>
+        <button id="logout-btn" class="btn btn-secondary btn-sm" title="Sign Out">
+          <i class="fa-solid fa-arrow-right-from-bracket"></i>
+          <span>Logout</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="app-container">
+
+    <!-- ==================== VIEW 1: AUTHENTICATION / LOGIN ==================== -->
+    <section id="auth-view" class="view auth-view">
+      <div class="auth-card">
+        <div class="auth-hero">
+          <div class="hero-badge">
+            <i class="fa-solid fa-bolt"></i> Real-Time Direct Messaging
+          </div>
+          <h1 class="auth-title">Connect & Chat Instantly</h1>
+          <p class="auth-desc">
+            Sign in with your Google account to discover registered users, exchange instant messages, and share photos & videos in real time.
+          </p>
+        </div>
+
+        <div class="auth-action-box">
+          <button id="google-login-btn" class="btn btn-google">
+            <svg class="google-svg" viewBox="0 0 24 24" width="22" height="22">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+            </svg>
+            <span>Continue with Google (Gmail)</span>
+          </button>
+
+          <p id="auth-error-msg" class="error-msg hidden"></p>
+
+          <div class="auth-features">
+            <div class="feature-item">
+              <i class="fa-solid fa-shield-halved"></i>
+              <span>Google Firebase Auth</span>
+            </div>
+            <div class="feature-item">
+              <i class="fa-solid fa-users"></i>
+              <span>View Registered Users</span>
+            </div>
+            <div class="feature-item">
+              <i class="fa-solid fa-comments"></i>
+              <span>1-on-1 Direct Chat</span>
+            </div>
+            <div class="feature-item">
+              <i class="fa-solid fa-photo-film"></i>
+              <span>Images & Videos (Free Firestore)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Setup guidance alert box if Firebase is not yet configured -->
+        <div id="setup-hint-card" class="setup-hint-card">
+          <div class="hint-header">
+            <i class="fa-solid fa-circle-info"></i>
+            <strong>Firebase Setup Status</strong>
+          </div>
+          <p id="setup-hint-text">
+            Connecting to Firebase configuration...
+          </p>
+          <button id="open-config-btn" class="btn btn-outline btn-sm">
+            <i class="fa-solid fa-gear"></i> Configure Firebase Keys
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== VIEW 2: CHATTING INTERFACE ==================== -->
+    <section id="chat-view" class="view chat-view hidden">
+      <!-- Left Sidebar: Users List -->
+      <aside id="chat-sidebar" class="chat-sidebar">
+        <!-- Sidebar Header with Search -->
+        <div class="sidebar-header">
+          <div class="sidebar-user-summary">
+            <img id="sidebar-user-avatar" src="" alt="Avatar" class="avatar-md">
+            <div class="sidebar-user-meta">
+              <h3 id="sidebar-user-name">User Name</h3>
+              <span id="sidebar-user-email">email@gmail.com</span>
+            </div>
+          </div>
+
+          <div class="search-box">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" id="user-search-input" placeholder="Search registered users..." autocomplete="off">
+            <button id="clear-search-btn" class="clear-search hidden"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+        </div>
+
+        <!-- Registered Users Header -->
+        <div class="users-section-title">
+          <span>Registered Users</span>
+          <span id="users-count-badge" class="badge">0</span>
+        </div>
+
+        <!-- Users List (Scrollable) -->
+        <div id="users-list" class="users-list">
+          <div class="loading-placeholder">
+            <div class="spinner"></div>
+            <span>Loading registered users...</span>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Right Chat Panel -->
+      <section id="chat-main" class="chat-main">
+        <!-- Empty State (No Chat Selected) -->
+        <div id="no-chat-state" class="no-chat-state">
+          <div class="empty-illustration">
+            <div class="empty-icon-circle">
+              <i class="fa-solid fa-comments"></i>
+            </div>
+            <h2>Select a User to Chat</h2>
+            <p>Pick any registered user from the sidebar on the left to start a 1-on-1 private conversation, send messages, and share images or videos.</p>
+          </div>
+        </div>
+
+        <!-- Active Chat Screen (Visible when a user is selected) -->
+        <div id="active-chat-container" class="active-chat-container hidden">
+          <!-- Chat Header -->
+          <div class="chat-header">
+            <button id="mobile-back-btn" class="btn-icon mobile-only" title="Back to user list">
+              <i class="fa-solid fa-arrow-left"></i>
+            </button>
+            <div class="recipient-profile">
+              <div class="avatar-wrapper">
+                <img id="recipient-avatar" src="" alt="Recipient Avatar" class="avatar-md">
+                <span id="recipient-status-dot" class="recipient-status-dot offline"></span>
+              </div>
+              <div class="recipient-details">
+                <h3 id="recipient-name">Recipient Name</h3>
+                <span id="recipient-status-text" class="recipient-status-text">Offline</span>
+              </div>
+            </div>
+
+            <div class="chat-header-actions">
+              <button id="refresh-chat-btn" class="btn-icon" title="Refresh messages">
+                <i class="fa-solid fa-rotate-right"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- Messages Stream -->
+          <div id="messages-container" class="messages-container">
+            <div class="chat-loading-spinner hidden" id="chat-loading-spinner">
+              <div class="spinner-sm"></div>
+              <span>Loading messages...</span>
+            </div>
+            <!-- Message items will be injected here dynamically -->
+          </div>
+
+          <!-- Media Preview (Shown when user selects an image or video before sending) -->
+          <div id="media-preview-container" class="media-preview-container hidden">
+            <div class="preview-card">
+              <div class="preview-media-wrapper" id="preview-media-wrapper">
+                <!-- dynamic <img> or <video> -->
+              </div>
+              <div class="preview-info">
+                <div class="preview-file-details">
+                  <span id="preview-file-name" class="preview-file-name">filename.jpg</span>
+                  <span id="preview-file-size" class="preview-file-size">1.2 MB</span>
+                </div>
+                <input type="text" id="media-caption-input" placeholder="Add a caption... (optional)">
+              </div>
+              <button id="cancel-preview-btn" class="btn-icon cancel-btn" title="Remove attachment">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- Upload Progress Indicator -->
+          <div id="upload-progress-container" class="upload-progress-container hidden">
+            <div class="upload-progress-info">
+              <span id="upload-status-label"><i class="fa-solid fa-cloud-arrow-up"></i> Uploading media...</span>
+              <span id="upload-percent-label">0%</span>
+            </div>
+            <div class="progress-bar-track">
+              <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%;"></div>
+            </div>
+          </div>
+
+          <!-- Chat Input Bar -->
+          <form id="chat-form" class="chat-input-area" onsubmit="return false;">
+            <!-- Hidden File Input for images and videos -->
+            <input type="file" id="media-file-input" accept="image/*,video/*" class="hidden-input">
+
+            <!-- Attachment Trigger Button -->
+            <button type="button" id="attach-btn" class="btn-icon attach-btn" title="Attach Image or Video">
+              <i class="fa-solid fa-paperclip"></i>
+            </button>
+
+            <!-- Message Textarea / Input -->
+            <div class="input-wrapper">
+              <textarea 
+                id="message-text-input" 
+                rows="1" 
+                placeholder="Type a message... (Shift+Enter for newline)"
+                autocomplete="off"></textarea>
+            </div>
+
+            <!-- Send Button -->
+            <button type="submit" id="send-message-btn" class="btn-send" title="Send message">
+              <i class="fa-solid fa-paper-plane"></i>
+            </button>
+          </form>
+        </div>
+      </section>
+    </section>
+
+  </main>
+
+  <!-- ==================== MODAL 1: FIREBASE CONFIGURATION ==================== -->
+  <div id="firebase-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <i class="fa-solid fa-gear modal-icon"></i>
+          <h3>Firebase Configuration</h3>
+        </div>
+        <button id="close-config-modal-btn" class="btn-icon"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <div class="modal-body">
+        <p class="modal-desc">
+          Enter your Firebase project credentials. You can either paste your Firebase Web App configuration object from the Firebase Console, or fill in the fields below.
+        </p>
+
+        <!-- Quick Paste JSON/Object -->
+        <div class="form-group">
+          <label for="config-paste-area">Paste Firebase Config Object (or JSON):</label>
+          <textarea id="config-paste-area" rows="4" placeholder="const firebaseConfig = {
+  apiKey: &quot;...&quot;,
+  authDomain: &quot;...&quot;,
+  projectId: &quot;...&quot;,
+  storageBucket: &quot;...&quot;,
+  messagingSenderId: &quot;...&quot;,
+  appId: &quot;...&quot;
+};"></textarea>
+          <button type="button" id="parse-pasted-config-btn" class="btn btn-secondary btn-sm" style="margin-top: 6px;">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-Fill Fields
+          </button>
+        </div>
+
+        <div class="divider-text">OR ENTER DETAILS MANUALLY</div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="cfg-apiKey">API Key *</label>
+            <input type="text" id="cfg-apiKey" placeholder="AIzaSy...">
+          </div>
+          <div class="form-group">
+            <label for="cfg-authDomain">Auth Domain *</label>
+            <input type="text" id="cfg-authDomain" placeholder="your-project.firebaseapp.com">
+          </div>
+          <div class="form-group">
+            <label for="cfg-projectId">Project ID *</label>
+            <input type="text" id="cfg-projectId" placeholder="your-project-id">
+          </div>
+          <div class="form-group">
+            <label for="cfg-storageBucket">Storage Bucket (Optional - Not Needed)</label>
+            <input type="text" id="cfg-storageBucket" placeholder="Not needed (media stored in free Firestore)">
+          </div>
+          <div class="form-group">
+            <label for="cfg-messagingSenderId">Messaging Sender ID</label>
+            <input type="text" id="cfg-messagingSenderId" placeholder="1234567890">
+          </div>
+          <div class="form-group">
+            <label for="cfg-appId">App ID *</label>
+            <input type="text" id="cfg-appId" placeholder="1:12345:web:67890">
+          </div>
+        </div>
+
+        <div class="firebase-quick-links">
+          <span><i class="fa-solid fa-lightbulb"></i> Where do I find this?</span>
+          <p>
+            Go to <a href="https://console.firebase.google.com/" target="_blank" rel="noopener">Firebase Console</a> &rarr; Select Project &rarr; <strong>Project settings</strong> &rarr; General &rarr; Under <strong>Your apps</strong>, click Web <code>(&lt;/&gt;)</code> to copy the config.
+          </p>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" id="clear-config-btn" class="btn btn-danger btn-sm">Clear Saved Config</button>
+        <div class="modal-footer-right">
+          <button type="button" id="cancel-config-btn" class="btn btn-secondary">Cancel</button>
+          <button type="button" id="save-config-btn" class="btn btn-primary">Save & Apply</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL 2: MEDIA LIGHTBOX ==================== -->
+  <div id="lightbox-modal" class="lightbox-modal hidden">
+    <button id="close-lightbox-btn" class="lightbox-close"><i class="fa-solid fa-xmark"></i></button>
+    <div class="lightbox-content" id="lightbox-content">
+      <!-- dynamic zoomed image or video -->
+    </div>
+  </div>
+
+  <!-- Application Scripts -->
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
